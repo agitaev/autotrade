@@ -86,7 +86,7 @@ function showHelp(): void {
 	console.log(`🤖 ChatGPT Trading Bot - Command Reference
 
 CORE OPERATIONS:
-  daily                    - Execute daily portfolio update with stop-loss monitoring
+  daily                   - Execute daily portfolio update with stop-loss monitoring
   ai-analysis             - Run AI-powered portfolio analysis and recommendations
   report                  - Generate interactive performance charts and analytics
   research                - Perform weekly deep research on holdings and opportunities
