@@ -1,0 +1,71 @@
+{
+  "name": "chatgpt-trading-bot",
+  "version": "1.0.0",
+  "description": "AI-powered automated trading bot with ChatGPT analysis, Alpaca integration, and comprehensive portfolio management",
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "clean": "rm -rf dist && rm -rf logs/*.log && rm -rf data/temp_*",
+    "dev": "ts-node src/index.ts",
+    "analysis:ai": "ts-node src/index.ts ai-analysis",
+    "analysis:full": "ts-node src/index.ts full-analysis",
+    "analysis:only": "ts-node src/index.ts analysis-only",
+    "update:only": "ts-node src/index.ts update-only",
+    "research": "ts-node src/research.ts",
+    "report": "ts-node src/graph.ts",
+    "stop": "ts-node src/emergency.ts",
+    "auto": "ts-node src/index.ts auto",
+    "ping": "ts-node src/index.ts health-check",
+    "ping:alpaca": "ts-node src/index.ts ping-alpaca",
+    "ping:openai": "ts-node src/index.ts ping-openai",
+    "ping:yahoo": "ts-node src/index.ts ping-yahoo",
+    "ping:telegram": "ts-node src/index.ts test-notifications",
+    "logs": "tail -f logs/*.log"
+  },
+  "dependencies": {
+    "@alpacahq/alpaca-trade-api": "^3.0.3",
+    "axios": "^1.6.0",
+    "csv-parser": "^3.0.0",
+    "csv-writer": "^1.6.0",
+    "dotenv": "^16.3.1",
+    "node-cron": "^3.0.3",
+    "plotly": "^1.0.6",
+    "yahoo-finance2": "^2.11.3"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "@types/node-cron": "^3.0.11",
+    "ts-node": "^10.9.1",
+    "typescript": "^5.0.0"
+  },
+  "engines": {
+    "node": ">=20.0.0",
+    "npm": ">=10.0.0"
+  },
+  "keywords": [
+    "trading",
+    "bot",
+    "chatgpt",
+    "openai",
+    "alpaca",
+    "stocks",
+    "automation",
+    "micro-cap",
+    "portfolio-management",
+    "ai-trading",
+    "algorithmic-trading",
+    "financial-analysis",
+    "telegram-bot",
+    "paper-trading"
+  ],
+  "author": {
+    "name": "Said Akhmed Agitaev",
+    "email": "a.agitaev@gmail.com"
+  },
+  "license": "MIT",
+  "files": [
+    "dist/**/*",
+    "README.md"
+  ]
+}
