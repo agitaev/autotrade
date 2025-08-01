@@ -83,11 +83,10 @@ async function initializeApplication(): Promise<TradingBot> {
  * Display comprehensive help information
  */
 function showHelp(): void {
-	console.log(`
-🤖 ChatGPT Trading Bot - Command Reference
+	console.log(`🤖 ChatGPT Trading Bot - Command Reference
 
 CORE OPERATIONS:
-  daily                   - Execute daily portfolio update with stop-loss monitoring
+  daily                    - Execute daily portfolio update with stop-loss monitoring
   ai-analysis             - Run AI-powered portfolio analysis and recommendations
   report                  - Generate interactive performance charts and analytics
   research                - Perform weekly deep research on holdings and opportunities
@@ -97,18 +96,22 @@ ADVANCED FEATURES:
   health-check            - Run comprehensive system health diagnostics
   test-notifications      - Test Telegram notification delivery
   portfolio-status        - Display detailed portfolio summary
-  generate-chart          - Create performance charts with custom options
   screen-microcaps        - Screen for new micro-cap investment opportunities
+  export-portfolio        - Export portfolio data to CSV format
 
 AUTOMATION:
   auto                    - Start automated trading with scheduled operations
-  cron-daily              - Run daily operations on schedule
-  cron-weekly             - Run weekly research and reporting
 
 ANALYSIS SERVICES:
   full-analysis           - Complete AI analysis workflow with notifications
   analysis-only           - AI analysis without portfolio updates
   update-only             - Portfolio update without AI analysis
+
+SYSTEM TESTING:
+  ping-alpaca             - Test Alpaca API connection
+  ping-openai             - Test OpenAI configuration
+  ping-yahoo              - Test Yahoo Finance connection
+  ping-all                - Test all service connections
 
 Environment Variables:
   ALPACA_API_KEY             - Alpaca trading API key (required)
@@ -125,21 +128,32 @@ Scheduling Configuration:
   CRON_WEEKLY_SCHEDULE       - Weekly research schedule (default: "0 14 * * 0")
   CRON_REPORT_SCHEDULE       - Weekly report schedule (default: "0 18 * * 0")
 
-Examples:
-  npm run dev daily                   # Run daily portfolio update
-  npm run dev ai-analysis             # Get AI recommendations
-  npm run dev full-analysis           # Complete analysis workflow
-  npm run dev report                  # Generate performance charts
-  npm run dev research                # Weekly deep research
-  npm run dev emergency-stop          # Emergency halt all trading
-  npm run dev health-check            # System diagnostics
-  npm run dev auto                    # Start automated mode
+Package.json Script Examples:
+  npm run dev                         # Interactive command mode
+  npm run analysis:ai                 # AI portfolio analysis
+  npm run analysis:full               # Complete analysis workflow
+  npm run research                    # Weekly deep research
+  npm run report                      # Generate performance charts
+  npm run stop                        # Emergency halt all trading
+  npm run ping                        # System health check
+  npm run auto                        # Start automated mode
+
+Connection Testing:
+  npm run ping:alpaca                 # Test Alpaca API
+  npm run ping:openai                 # Test OpenAI configuration
+  npm run ping:yahoo                  # Test Yahoo Finance
+  npm run ping:telegram               # Test Telegram notifications
+
+Development Commands:
+  npm run build                       # Compile TypeScript
+  npm run clean                       # Clean build files and logs
+  npm run logs                        # View real-time logs
 
 Advanced Examples:
-  RESEARCH_SAVE_REPORTS=true npm run dev research
+  RESEARCH_SAVE_REPORTS=true npm run research
   UPDATE_SEND_NOTIFICATION=true npm run dev daily
-  GRAPH_AUTO_OPEN=true npm run dev report
-  FORCE_STOP=true npm run dev emergency-stop
+  GRAPH_AUTO_OPEN=true npm run report
+  FORCE_STOP=true npm run stop
 `);
 }
 
