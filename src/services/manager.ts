@@ -256,7 +256,13 @@ export class PortfolioManager {
 		ticker: string,
 		shares: number,
 		stopLoss: number
-	): Promise<void> {
+	): Promise<{
+		ticker: string;
+		shares: number;
+		price: number;
+		totalValue: number;
+		stopLoss: number;
+	}> {
 		if (!ticker || shares <= 0) {
 			throw new Error(
 				'Invalid buy parameters: ticker and shares must be valid'
@@ -298,6 +304,14 @@ export class PortfolioManager {
 					2
 				)}`
 			);
+
+			return {
+				ticker,
+				shares,
+				price: currentPrice,
+				totalValue: cost,
+				stopLoss
+			};
 		} catch (error) {
 			console.error(`❌ Error executing buy for ${ticker}:`, error);
 			throw new Error(`Failed to execute buy order for ${ticker}: ${error}`);
@@ -319,7 +333,12 @@ export class PortfolioManager {
 	 * await manager.executeSell('AAPL', 5);
 	 * ```
 	 */
-	async executeSell(ticker: string, shares: number): Promise<void> {
+	async executeSell(ticker: string, shares: number): Promise<{
+		ticker: string;
+		shares: number;
+		price: number;
+		totalValue: number;
+	}> {
 		if (!ticker || shares <= 0) {
 			throw new Error(
 				'Invalid sell parameters: ticker and shares must be valid'
@@ -348,6 +367,14 @@ export class PortfolioManager {
 					2
 				)}`
 			);
+
+			const totalValue = currentPrice * shares;
+			return {
+				ticker,
+				shares,
+				price: currentPrice,
+				totalValue
+			};
 		} catch (error) {
 			console.error(`❌ Error executing sell for ${ticker}:`, error);
 			throw new Error(`Failed to execute sell order for ${ticker}: ${error}`);
@@ -373,23 +400,23 @@ export class PortfolioManager {
 		try {
 			const historyData = await this._loadPortfolioHistory();
 
-			if (historyData.length < 2) {
-				console.log('⚠️ Insufficient data for metrics calculation');
-				return this._getEmptyMetrics();
+			// Try to calculate from historical data first
+			if (historyData.length >= 2) {
+				const equities = historyData
+					.map((d) => d.totalEquity)
+					.filter((e) => !isNaN(e) && e > 0);
+
+				if (equities.length >= 2) {
+					return this._calculateMetrics(equities);
+				}
 			}
 
-			const equities = historyData
-				.map((d) => d.totalEquity)
-				.filter((e) => !isNaN(e) && e > 0);
-
-			if (equities.length < 2) {
-				return this._getEmptyMetrics();
-			}
-
-			return this._calculateMetrics(equities);
+			// Fallback to real-time metrics when historical data is insufficient
+			console.log('⚠️ Insufficient historical data, calculating real-time metrics...');
+			return await this._getRealTimeMetrics();
 		} catch (error) {
 			console.error('❌ Error calculating portfolio metrics:', error);
-			return this._getEmptyMetrics();
+			return await this._getRealTimeMetrics();
 		}
 	}
 
@@ -821,6 +848,83 @@ export class PortfolioManager {
 	 * @private
 	 * @returns Empty portfolio metrics
 	 */
+	/**
+	 * Calculate real-time portfolio metrics from current positions and cash
+	 * @private
+	 */
+	private async _getRealTimeMetrics(): Promise<PortfolioMetrics> {
+		try {
+			// Get current positions and cash
+			const positions = await this.getCurrentPortfolio();
+			const cash = await this.getCash();
+			
+			// Also get account data for backup total equity
+			const account = await this.alpaca.getAccount();
+			
+			console.log(`🔍 Real-time metrics calculation:`);
+			console.log(`   📊 Positions: ${positions.length}`);
+			console.log(`   💵 Cash: $${cash.toFixed(2)}`);
+			
+			// Calculate total market value of positions
+			const totalPositionValue = positions.reduce((sum, pos) => {
+				const posValue = pos.marketValue || pos.currentPrice * pos.shares || 0;
+				console.log(`   📈 ${pos.ticker}: $${posValue.toFixed(2)} (${pos.shares} shares @ $${pos.currentPrice?.toFixed(2) || 'N/A'})`);
+				return sum + posValue;
+			}, 0);
+			
+			console.log(`   💰 Total Position Value: $${totalPositionValue.toFixed(2)}`);
+			
+			// Total equity = cash + position values (or use Alpaca's equity if our calculation is wrong)
+			let totalEquity = cash + totalPositionValue;
+			const alpacaEquity = parseFloat(account.equity) || 0;
+			
+			console.log(`   🏦 Calculated Total Equity: $${totalEquity.toFixed(2)}`);
+			console.log(`   🏦 Alpaca Total Equity: $${alpacaEquity.toFixed(2)}`);
+			
+			// Use Alpaca's equity if it's significantly different (more reliable)
+			if (Math.abs(totalEquity - alpacaEquity) > 100 && alpacaEquity > 0) {
+				console.log(`   ⚠️  Using Alpaca's equity value (significant difference detected)`);
+				totalEquity = alpacaEquity;
+			}
+			
+			// Calculate total unrealized P&L
+			const totalUnrealizedPL = positions.reduce((sum, pos) => {
+				const pl = pos.unrealizedPl || 0;
+				return sum + pl;
+			}, 0);
+			
+			// Calculate total cost basis
+			const totalCostBasis = positions.reduce((sum, pos) => {
+				const basis = pos.costBasis || pos.buyPrice * pos.shares || 0;
+				return sum + basis;
+			}, 0);
+			
+			console.log(`   📊 Total Unrealized P&L: $${totalUnrealizedPL.toFixed(2)}`);
+			console.log(`   💸 Total Cost Basis: $${totalCostBasis.toFixed(2)}`);
+			
+			// Simple return calculation based on unrealized P&L
+			let totalReturn = 0;
+			if (totalCostBasis > 0) {
+				totalReturn = totalUnrealizedPL / totalCostBasis;
+			}
+			
+			console.log(`   📈 Total Return: ${(totalReturn * 100).toFixed(2)}%`);
+			
+			// For now, set advanced metrics to 0 (would need historical data for proper calculation)
+			return {
+				totalEquity,
+				totalReturn,
+				sharpeRatio: 0,
+				sortinoRatio: 0,
+				maxDrawdown: 0,
+				winRate: 0,
+			};
+		} catch (error) {
+			console.error('❌ Error calculating real-time metrics:', error);
+			return this._getEmptyMetrics();
+		}
+	}
+
 	private _getEmptyMetrics(): PortfolioMetrics {
 		return {
 			totalEquity: 0,

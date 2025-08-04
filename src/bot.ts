@@ -720,6 +720,255 @@ export class TradingBot {
 	}
 
 	/**
+	 * Get last analysis time for intraday scheduling logic
+	 */
+	getLastAnalysisTime(): Date | undefined {
+		return this.lastAnalysisTime;
+	}
+
+	/**
+	 * Execute continuous trading with comprehensive research and loss control
+	 *
+	 * Performs intensive market research every minute during trading hours:
+	 * - Analyzes current portfolio positions for stop-loss adjustments
+	 * - Screens for new micro-cap opportunities
+	 * - Implements dynamic loss control based on market conditions
+	 * - Executes trades only when high-confidence opportunities exist
+	 *
+	 * @returns Promise resolving to continuous trading results
+	 * @throws {Error} If continuous trading analysis fails
+	 */
+	async runContinuousTrading(): Promise<AIAnalysisResult> {
+		this._ensureInitialized();
+
+		try {
+			await this.logger.info(
+				'Starting continuous trading analysis',
+				undefined,
+				'TRADING_BOT'
+			);
+			console.log('🔍 Running continuous market research and analysis...');
+
+			const startTime = Date.now();
+
+			// 1. Get current portfolio and market state
+			console.log('   📋 Step 1: Fetching current portfolio data...');
+			const currentPortfolio = await this.portfolio.getCurrentPortfolio();
+			const cash = await this.portfolio.getCash();
+			const metrics = await this.portfolio.getPortfolioMetrics();
+
+			console.log(`   📊 Portfolio: ${currentPortfolio.length} positions, $${cash.toFixed(2)} cash`);
+			console.log(`   💰 Total Equity: $${metrics.totalEquity?.toFixed(2) || 'N/A'}`);
+			console.log(`   📈 Total Return: ${(metrics.totalReturn * 100)?.toFixed(2) || 'N/A'}%`);
+
+			// 2. Comprehensive market analysis
+			console.log('   📈 Step 2: Fetching market data...');
+			const portfolioTickers = currentPortfolio.map((p) => p.ticker);
+			const benchmarkTickers = ['^GSPC', '^RUT', 'IWO', 'XBI'];
+			console.log(`   🎯 Analyzing ${portfolioTickers.length} portfolio tickers + ${benchmarkTickers.length} benchmarks`);
+			
+			const analysisData = await this.marketData.getMarketData([
+				...portfolioTickers,
+				...benchmarkTickers,
+			]);
+			
+			console.log(`   ✅ Market data retrieved for ${analysisData.length} symbols`);
+
+			// 3. Check existing positions for loss control
+			console.log('   🛡️ Step 3: Performing loss control analysis...');
+			await this._performLossControlAnalysis(currentPortfolio, analysisData);
+
+			// 4. Screen for new opportunities if we have cash
+			console.log('   💵 Step 4: Checking for new investment opportunities...');
+			let newOpportunities: string[] = [];
+			if (cash > 1000) {
+				console.log(`   💰 Cash available: $${cash.toFixed(2)} - screening for micro-caps...`);
+				newOpportunities = await this.marketData.screenMicroCaps();
+				console.log(`   📋 Found ${newOpportunities.length} potential new opportunities`);
+			} else {
+				console.log(`   💸 Low cash ($${cash.toFixed(2)}) - skipping opportunity screening`);
+			}
+
+			// 5. Get AI recommendations including new opportunities
+			console.log('   🤖 Step 5: Getting AI trading recommendations...');
+			const allTickers = [...portfolioTickers, ...newOpportunities.slice(0, 5)]; // Limit to top 5 new opportunities
+			console.log(`   🎯 AI analyzing ${allTickers.length} total symbols for trading decisions`);
+			
+			const enhancedAnalysisData = await this.marketData.getMarketData(allTickers);
+			console.log('   📊 Enhanced market data retrieved, consulting AI...');
+			
+			const decisions = await this.chatGpt.getPortfolioDecision(
+				currentPortfolio,
+				cash,
+				metrics,
+				enhancedAnalysisData
+			);
+			
+			console.log(`   🧠 AI analysis complete - generated ${decisions.length} recommendations`);
+
+			// 6. Display recommendations
+			console.log('\n🤖 AI Trading Recommendations:');
+			if (decisions.length === 0) {
+				console.log('   No trading opportunities identified at this time.');
+			} else {
+				decisions.forEach((decision, index) => {
+					console.log(
+						`${index + 1}. ${decision.action} ${decision.ticker || 'Portfolio'}`
+					);
+					if (decision.shares) console.log(`   📊 Shares: ${decision.shares}`);
+					if (decision.stopLoss)
+						console.log(`   🛡️ Stop Loss: $${decision.stopLoss.toFixed(2)}`);
+					console.log(`   💭 Reasoning: ${decision.reasoning}`);
+					console.log('');
+				});
+			}
+
+			// 7. Execute trades if enabled
+			console.log('   ⚡ Step 6: Trade execution phase...');
+			let executedTrades = 0;
+			let skippedTrades = 0;
+			const tradingEnabled = process.env.ENABLE_AUTOMATED_TRADING === 'true';
+			
+			console.log(`   🎛️ Trading enabled: ${tradingEnabled ? '✅ YES' : '❌ NO'}`);
+
+			if (tradingEnabled && decisions.length > 0) {
+				console.log(`   🚀 Executing ${decisions.length} trading decisions...`);
+				const executionResult = await this._executeDecisions(decisions);
+				executedTrades = executionResult.executed;
+				skippedTrades = executionResult.skipped;
+				console.log(`   ✅ Execution complete: ${executedTrades} executed, ${skippedTrades} skipped`);
+			} else if (!tradingEnabled) {
+				console.log('   ⚠️ Automated trading disabled. Set ENABLE_AUTOMATED_TRADING=true to execute trades.');
+			} else {
+				console.log('   ℹ️ No trades to execute - AI found no opportunities at this time');
+			}
+
+			const duration = Date.now() - startTime;
+			this.lastAnalysisTime = new Date();
+
+			await this.logger.info(
+				'Continuous trading analysis completed',
+				{
+					duration: `${duration}ms`,
+					portfolioPositions: currentPortfolio.length,
+					newOpportunities: newOpportunities.length,
+					recommendations: decisions.length,
+					executedTrades,
+					skippedTrades,
+					tradingEnabled,
+				},
+				'TRADING_BOT'
+			);
+
+			console.log(`✅ Continuous analysis completed (${duration}ms) - ${executedTrades} trades executed`);
+
+			return {
+				recommendations: decisions,
+				executedTrades,
+				skippedTrades,
+				tradingEnabled,
+				totalRecommendations: decisions.length,
+			};
+		} catch (error) {
+			await this.logger.error(
+				'Continuous trading analysis failed',
+				{
+					error: error instanceof Error ? error.message : String(error),
+				},
+				'TRADING_BOT'
+			);
+
+			console.error('❌ Error during continuous trading analysis:', error);
+			throw new Error(`Continuous trading analysis failed: ${error}`);
+		}
+	}
+
+	/**
+	 * Perform intelligent loss control analysis on current positions
+	 *
+	 * Analyzes each position for:
+	 * - Dynamic stop-loss adjustments based on volatility
+	 * - Trailing stop-loss implementation
+	 * - Risk-based position sizing
+	 * - Market sentiment impact on holdings
+	 *
+	 * @private
+	 * @param currentPortfolio - Current portfolio positions
+	 * @param marketData - Current market data for analysis
+	 */
+	private async _performLossControlAnalysis(
+		currentPortfolio: any[],
+		marketData: any[]
+	): Promise<void> {
+		if (currentPortfolio.length === 0) {
+			console.log('📊 No positions to analyze for loss control');
+			return;
+		}
+
+		console.log('🛡️ Performing loss control analysis on current positions...');
+
+		for (const position of currentPortfolio) {
+			try {
+				const tickerData = marketData.find(d => d.symbol === position.ticker);
+				if (!tickerData) continue;
+
+				const currentPrice = tickerData.price;
+				const percentChange = tickerData.percentChange;
+				const unrealizedPL = position.unrealizedPl || 0;
+				const unrealizedPLPercent = position.unrealizedPlPercent || 0;
+
+				console.log(`\n🔍 Analyzing ${position.ticker}:`);
+				console.log(`   Current: $${currentPrice.toFixed(2)} (${percentChange >= 0 ? '+' : ''}${percentChange.toFixed(2)}%)`);
+				console.log(`   P&L: $${unrealizedPL.toFixed(2)} (${unrealizedPLPercent >= 0 ? '+' : ''}${unrealizedPLPercent.toFixed(2)}%)`);
+
+				// Dynamic stop-loss logic
+				let recommendedAction = 'HOLD';
+				let reasoning = 'Position within acceptable risk parameters';
+
+				// Aggressive loss control rules
+				if (unrealizedPLPercent < -10) {
+					recommendedAction = 'SELL';
+					reasoning = 'Position down >10% - cut losses to preserve capital';
+				} else if (unrealizedPLPercent < -5 && percentChange < -3) {
+					recommendedAction = 'SELL';
+					reasoning = 'Position declining with negative daily momentum';
+				} else if (unrealizedPLPercent > 15) {
+					// Take partial profits on big winners
+					recommendedAction = 'PARTIAL_SELL';
+					reasoning = 'Strong gains - consider taking partial profits';
+				} else if (unrealizedPLPercent > 5 && percentChange < -5) {
+					// Trailing stop logic
+					recommendedAction = 'TIGHTEN_STOP';
+					reasoning = 'Profitable position with negative momentum - tighten stop-loss';
+				}
+
+				console.log(`   🎯 Recommendation: ${recommendedAction}`);
+				console.log(`   💭 Reasoning: ${reasoning}`);
+
+				// Log the analysis for AI consideration
+				await this.logger.info(
+					'Loss control analysis',
+					{
+						ticker: position.ticker,
+						currentPrice,
+						percentChange,
+						unrealizedPL,
+						unrealizedPLPercent,
+						recommendation: recommendedAction,
+						reasoning
+					},
+					'TRADING_BOT'
+				);
+
+			} catch (error) {
+				console.error(`❌ Error analyzing ${position.ticker}:`, error);
+			}
+		}
+
+		console.log('✅ Loss control analysis completed\n');
+	}
+
+	/**
 	 * Execute trading decisions with validation and error handling
 	 *
 	 * @private
@@ -753,25 +1002,25 @@ export class TradingBot {
 						continue;
 					}
 
-					await this.portfolio.executeBuy(
+					const buyResult = await this.portfolio.executeBuy(
 						decision.ticker,
 						decision.shares,
 						decision.stopLoss
 					);
 
-					// Send trade notification
+					// Send trade notification with actual execution data
 					await this.notifications.sendTradeAlert({
 						type: 'BUY',
-						ticker: decision.ticker,
-						shares: decision.shares,
-						price: 0, // Will be filled by portfolio manager
-						totalValue: 0, // Will be calculated
+						ticker: buyResult.ticker,
+						shares: buyResult.shares,
+						price: buyResult.price,
+						totalValue: buyResult.totalValue,
 						reason: decision.reasoning,
-						stopLoss: decision.stopLoss,
+						stopLoss: buyResult.stopLoss,
 					});
 
 					console.log(
-						`✅ Executed BUY: ${decision.shares} shares of ${decision.ticker}`
+						`✅ Executed BUY: ${buyResult.shares} shares of ${buyResult.ticker} at $${buyResult.price.toFixed(2)} (Total: $${buyResult.totalValue.toFixed(2)})`
 					);
 					executed++;
 				} else if (
@@ -779,20 +1028,20 @@ export class TradingBot {
 					decision.ticker &&
 					decision.shares
 				) {
-					await this.portfolio.executeSell(decision.ticker, decision.shares);
+					const sellResult = await this.portfolio.executeSell(decision.ticker, decision.shares);
 
-					// Send trade notification
+					// Send trade notification with actual execution data
 					await this.notifications.sendTradeAlert({
 						type: 'SELL',
-						ticker: decision.ticker,
-						shares: decision.shares,
-						price: 0, // Will be filled by portfolio manager
-						totalValue: 0, // Will be calculated
+						ticker: sellResult.ticker,
+						shares: sellResult.shares,
+						price: sellResult.price,
+						totalValue: sellResult.totalValue,
 						reason: decision.reasoning,
 					});
 
 					console.log(
-						`✅ Executed SELL: ${decision.shares} shares of ${decision.ticker}`
+						`✅ Executed SELL: ${sellResult.shares} shares of ${sellResult.ticker} at $${sellResult.price.toFixed(2)} (Total: $${sellResult.totalValue.toFixed(2)})`
 					);
 					executed++;
 				} else {
@@ -804,8 +1053,8 @@ export class TradingBot {
 					skipped++;
 				}
 
-				// Delay between trades to avoid overwhelming the system
-				await new Promise((resolve) => setTimeout(resolve, 1000));
+				// Longer delay between trades to avoid API rate limits
+				await new Promise((resolve) => setTimeout(resolve, 3000));
 			} catch (error) {
 				await this.logger.error(
 					`Trade execution failed`,

@@ -13,7 +13,12 @@ import { MarketDataService } from './services/yahoo';
 import { ChatGPTService } from './services/gpt';
 import { AlpacaService } from './services/alpaca';
 
-dotenv.config();
+const dotenvResult = dotenv.config();
+if (dotenvResult.error) {
+	console.warn('⚠️  Warning: .env file not found or could not be loaded:', dotenvResult.error.message);
+} else {
+	console.log('✅ Environment variables loaded from .env file');
+}
 
 /**
  * Main Trading Bot Application
@@ -164,14 +169,50 @@ async function runAutomatedMode(bot: TradingBot): Promise<void> {
 	const dailySchedule = process.env.CRON_DAILY_SCHEDULE || '0 16 * * 1-5';
 	const weeklySchedule = process.env.CRON_WEEKLY_SCHEDULE || '0 14 * * 0';
 	const reportSchedule = process.env.CRON_REPORT_SCHEDULE || '0 18 * * 0';
+	const intradaySchedule = process.env.CRON_INTRADAY_SCHEDULE || '*/1 9-15 * * 1-5';
+	const intradayEnabled = process.env.ENABLE_INTRADAY_TRADING === 'true';
 
 	console.log('🤖 Starting automated trading bot...');
 	console.log(`📅 Daily Schedule: ${dailySchedule} (After market close)`);
 	console.log(`📚 Weekly Research: ${weeklySchedule} (Sunday afternoon)`);
 	console.log(`📊 Weekly Reports: ${reportSchedule} (Sunday evening)`);
+	if (intradayEnabled) {
+		console.log(`⚡ Intraday Trading: ${intradaySchedule} (Every minute during market hours)`);
+	}
 	console.log('='.repeat(60));
+	console.log('⏰ Registering cron jobs...');
+	
+	// Test the cron library immediately
+	console.log('🧪 Testing cron library...');
+	try {
+		const testValidation = cron.validate('*/5 * * * * *');
+		console.log(`✅ Cron pattern validation: ${testValidation ? 'VALID' : 'INVALID'}`);
+	} catch (error) {
+		console.error('❌ Cron validation failed:', error);
+	}
+
+	// TEST CRON: Simple heartbeat every 5 seconds
+	console.log(`✅ Test heartbeat cron registered: */5 * * * * *`);
+	const testCron = cron.schedule('*/5 * * * * *', () => {
+		console.log(`💓 HEARTBEAT: ${new Date().toLocaleTimeString()} - Cron system is working!`);
+	}, {
+		scheduled: true
+	});
+	
+	console.log(`🔍 Test cron created: ${testCron ? 'SUCCESS' : 'FAILED'}`);
+	
+	// Start the cron explicitly
+	testCron.start();
+	console.log('🚀 Test cron started explicitly');
+	
+	// BACKUP TEST: Also test with setTimeout to compare
+	console.log('🕐 Starting setTimeout backup test (every 3 seconds)...');
+	setInterval(() => {
+		console.log(`🔄 BACKUP TEST: ${new Date().toLocaleTimeString()} - setTimeout is working!`);
+	}, 3000);
 
 	// Daily operations: Portfolio update + AI analysis
+	console.log(`✅ Daily operations cron registered: ${dailySchedule}`);
 	cron.schedule(dailySchedule, async () => {
 		console.log('\n⏰ Scheduled daily operations starting...');
 
@@ -219,6 +260,7 @@ async function runAutomatedMode(bot: TradingBot): Promise<void> {
 	});
 
 	// Weekly deep research
+	console.log(`✅ Weekly research cron registered: ${weeklySchedule}`);
 	cron.schedule(weeklySchedule, async () => {
 		console.log('\n📚 Scheduled weekly research starting...');
 
@@ -261,6 +303,7 @@ async function runAutomatedMode(bot: TradingBot): Promise<void> {
 	});
 
 	// Weekly report generation
+	console.log(`✅ Weekly reports cron registered: ${reportSchedule}`);
 	cron.schedule(reportSchedule, async () => {
 		console.log('\n📊 Scheduled weekly report generation starting...');
 
@@ -304,7 +347,93 @@ async function runAutomatedMode(bot: TradingBot): Promise<void> {
 		}
 	});
 
+	// Intraday trading during market hours (if enabled) - TEST MODE: every 30 seconds
+	if (intradayEnabled) {
+		const testIntradaySchedule = '*/30 * * * * *'; // Every 30 seconds for testing
+		console.log(`✅ Intraday trading cron registered: ${testIntradaySchedule} (TEST MODE)`);
+		cron.schedule(testIntradaySchedule, async () => {
+			console.log('\n⚡ Scheduled intraday trading operations starting...');
+
+			try {
+				const now = new Date();
+				const localTime = now.toLocaleTimeString();
+				const etTime = now.toLocaleString("en-US", {timeZone: "America/New_York"});
+				console.log(`   ⏰ Local: ${localTime} | ET: ${etTime}`);
+				
+				// Check if market is actually open
+				const alpacaService = new AlpacaService();
+				const isMarketOpen = alpacaService.isMarketOpen();
+				console.log(`   📈 Market Status: ${isMarketOpen ? '🟢 OPEN' : '🔴 CLOSED'}`);
+				
+				if (!isMarketOpen) {
+					console.log('   ⏸️  Market is closed, skipping intraday operations');
+					return;
+				}
+
+				// Continuous research mode - analyze market every minute for opportunities
+				console.log('   🔍 Market is open! Running continuous research and analysis...');
+
+				await logger.info(
+					'Starting scheduled intraday trading',
+					undefined,
+					'CRON'
+				);
+
+				// Run continuous trading with comprehensive research
+				const result = await bot.runContinuousTrading();
+
+				console.log('✅ Scheduled intraday operations completed');
+				await logger.info(
+					'Scheduled intraday operations completed',
+					{
+						recommendations: result.totalRecommendations,
+						executedTrades: result.executedTrades,
+						skippedTrades: result.skippedTrades,
+					},
+					'CRON'
+				);
+
+			} catch (error) {
+				console.error('❌ Scheduled intraday operations failed:', error);
+				await logger.error(
+					'Scheduled intraday operations failed',
+					{
+						error: error instanceof Error ? error.message : String(error),
+					},
+					'CRON'
+				);
+
+				// Send error notification
+				await notifications.sendAlert(
+					'Intraday Trading Failed',
+					`Intraday trading operations failed: ${error}`,
+					'error'
+				);
+			}
+		});
+	}
+
+	// Status update every 10 seconds to show bot is alive (TEST MODE)
+	console.log(`✅ Status update cron registered: */10 * * * * *`);
+	cron.schedule('*/10 * * * * *', async () => {
+		const now = new Date();
+		const localTime = now.toLocaleTimeString();
+		const etTime = now.toLocaleString("en-US", {timeZone: "America/New_York"});
+		const isMarketOpen = new AlpacaService().isMarketOpen();
+		const marketStatus = isMarketOpen ? '🟢 OPEN' : '🔴 CLOSED';
+		console.log(`\n⏱️  Local: ${localTime} | ET: ${etTime} | Market: ${marketStatus}`);
+		
+		if (intradayEnabled && isMarketOpen) {
+			console.log('   🔍 Continuous trading mode active - analyzing every minute');
+		} else if (intradayEnabled && !isMarketOpen) {
+			console.log('   ⏸️  Waiting for market open to resume continuous trading');
+		} else {
+			console.log('   ⏳ Waiting for scheduled operations...');
+		}
+	});
+
 	// Health check every 6 hours
+	console.log(`✅ Health check cron registered: 0 */6 * * *`);
 	cron.schedule('0 */6 * * *', async () => {
 		console.log('\n🏥 Scheduled health check starting...');
 
@@ -323,18 +452,35 @@ async function runAutomatedMode(bot: TradingBot): Promise<void> {
 		}
 	});
 
-	console.log('✅ Automated trading bot is running...');
-	console.log('📊 Monitoring schedule:');
+	console.log('\n🎯 All cron jobs registered successfully!');
+	console.log('⏰ Cron jobs should start running immediately...');
+	console.log('   💓 Heartbeat: Every 5 seconds');
+	console.log('   ⏱️  Status: Every 10 seconds');
+	console.log('   ⚡ Trading: Every 30 seconds (TEST MODE)');
+	console.log('   🏥 Health: Every 6 hours');
+	console.log('');
+	console.log('✅ Automated trading bot is running with CONTINUOUS RESEARCH MODE...');
+	console.log('📊 Aggressive Trading Schedule:');
 	console.log('   - Daily operations: After market close (Mon-Fri)');
 	console.log('   - Weekly research: Sunday afternoon');
 	console.log('   - Weekly reports: Sunday evening');
+	if (intradayEnabled) {
+		console.log('   - 🔥 CONTINUOUS TRADING: Every minute during market hours with:');
+		console.log('     • Real-time loss control analysis');
+		console.log('     • Micro-cap opportunity screening');
+		console.log('     • Dynamic stop-loss adjustments');
+		console.log('     • Immediate trade execution on opportunities');
+	}
 	console.log('   - Health checks: Every 6 hours');
-	console.log('\nPress Ctrl+C to stop the bot');
+	console.log('\n⚠️  AGGRESSIVE MODE: Bot will execute trades every minute when opportunities exist');
+	console.log('Press Ctrl+C to stop the bot');
 
 	// Send startup notification
+	const scheduleMessage = `🔥 AGGRESSIVE TRADING BOT ACTIVATED\n\n⚡ Continuous trading every minute\n🎯 Real-time loss control\n🔍 Micro-cap screening\n🛡️ Dynamic stop-losses\n\n⚠️ Will execute trades aggressively!`;
+	
 	await notifications.sendAlert(
-		'Trading Bot Started',
-		`Automated trading bot is now running with the following schedule:\n\n📅 Daily: ${dailySchedule}\n📚 Research: ${weeklySchedule}\n📊 Reports: ${reportSchedule}`,
+		'🚀 Trading Bot Started',
+		scheduleMessage,
 		'success'
 	);
 }

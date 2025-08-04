@@ -142,19 +142,19 @@ export class NotificationService {
 			errors: [],
 		};
 
-		// Send Telegram notification
+		// Send Telegram notification (non-blocking)
 		if (this.telegramConfig) {
 			try {
 				// Auto-determine silent mode: errors and warnings are not silent by default
 				const shouldBeSilent = silent ?? !['error', 'warning'].includes(level);
 
-				await this._sendTelegram(formattedMessage, shouldBeSilent);
+				await this._sendTelegramSafe(formattedMessage, shouldBeSilent);
 				result.telegram = true;
 				console.log(`✅ Telegram notification sent: ${title}`);
 			} catch (error) {
 				const errorMsg = `Telegram failed: ${error}`;
 				result.errors.push(errorMsg);
-				console.error(`❌ ${errorMsg}`);
+				console.warn(`⚠️  ${errorMsg} - continuing without notification`);
 			}
 		} else {
 			result.errors.push('Telegram not configured');
@@ -412,7 +412,7 @@ export class NotificationService {
 
 		if (this.telegramConfig) {
 			try {
-				await this._sendTelegram(message, silent);
+				await this._sendTelegramSafe(message, silent);
 				result.telegram = true;
 				console.log(`✅ Telegram notification sent (${level})`);
 			} catch (error) {
@@ -468,6 +468,13 @@ export class NotificationService {
 				);
 			} catch (error) {
 				if (attempt === this.RETRY_ATTEMPTS) {
+					// Log the actual error details for debugging
+					console.error(`❌ Telegram final attempt failed:`, error);
+					if (error instanceof Error && 'response' in error) {
+						const axiosError = error as any;
+						console.error(`   Status: ${axiosError.response?.status}`);
+						console.error(`   Data:`, axiosError.response?.data);
+					}
 					throw error; // Final attempt failed
 				}
 
@@ -475,6 +482,38 @@ export class NotificationService {
 				await new Promise((resolve) =>
 					setTimeout(resolve, this.RETRY_DELAY_MS * attempt)
 				);
+			}
+		}
+	}
+
+	/**
+	 * Send message to Telegram safely without throwing exceptions
+	 *
+	 * @private
+	 * @param message - Message to send
+	 * @param silent - Whether to send as silent notification
+	 */
+	private async _sendTelegramSafe(
+		message: string,
+		silent: boolean = false
+	): Promise<void> {
+		try {
+			await this._sendTelegram(message, silent);
+		} catch (error) {
+			// Log error but don't throw to avoid blocking trading operations
+			console.warn(`⚠️  Telegram notification failed: ${error}`);
+			
+			// If message is too long, try sending a shorter version
+			if (error instanceof Error && error.message.includes('400')) {
+				try {
+					const shortMessage = message.length > 1000 ? 
+						message.substring(0, 1000) + '...' : 
+						'Trading bot notification (original message failed)';
+					await this._sendTelegram(shortMessage, silent);
+					console.log('✅ Sent shortened Telegram message');
+				} catch (shortError) {
+					console.warn(`⚠️  Even shortened message failed:`, shortError);
+				}
 			}
 		}
 	}

@@ -6,6 +6,14 @@ import {
 	OpenAIResponse,
 } from '../types';
 
+interface ResearchCacheEntry {
+	ticker: string;
+	decision: ChatGPTDecision | null;
+	timestamp: number;
+	marketData: any;
+	portfolioSnapshot: string; // Hash of portfolio state when decision was made
+}
+
 /**
  * Service for interacting with OpenAI's ChatGPT API for trading decisions
  *
@@ -31,6 +39,10 @@ export class ChatGPTService {
 	private readonly baseUrl: string = 'https://api.openai.com/v1';
 	private readonly defaultModel: string = 'gpt-4o';
 	private readonly researchModel: string = 'gpt-4';
+	
+	// Research cache to avoid redundant API calls
+	private readonly researchCache: Map<string, ResearchCacheEntry> = new Map();
+	private readonly cacheExpirationMs: number = 15 * 60 * 1000; // 15 minutes
 
 	/**
 	 * Initialize ChatGPT service with API credentials
@@ -42,6 +54,43 @@ export class ChatGPTService {
 
 		if (!this.apiKey) {
 			throw new Error('OPENAI_API_KEY environment variable is required');
+		}
+	}
+
+	/**
+	 * Create a simple hash of portfolio state for cache comparison
+	 * @private
+	 */
+	private _createPortfolioHash(portfolio: Position[], cash: number): string {
+		const portfolioString = portfolio
+			.map(p => `${p.ticker}:${p.shares}:${p.currentPrice}`)
+			.sort()
+			.join('|');
+		return `${portfolioString}:${cash.toFixed(2)}`;
+	}
+
+	/**
+	 * Check if cached research is still valid
+	 * @private
+	 */
+	private _isCacheValid(entry: ResearchCacheEntry, currentPortfolioHash: string): boolean {
+		const now = Date.now();
+		const isNotExpired = (now - entry.timestamp) < this.cacheExpirationMs;
+		const portfolioUnchanged = entry.portfolioSnapshot === currentPortfolioHash;
+		
+		return isNotExpired && portfolioUnchanged;
+	}
+
+	/**
+	 * Clean expired cache entries
+	 * @private
+	 */
+	private _cleanExpiredCache(): void {
+		const now = Date.now();
+		for (const [ticker, entry] of this.researchCache.entries()) {
+			if ((now - entry.timestamp) >= this.cacheExpirationMs) {
+				this.researchCache.delete(ticker);
+			}
 		}
 	}
 
@@ -77,11 +126,55 @@ export class ChatGPTService {
 		metrics: PortfolioMetrics,
 		marketData: any[]
 	): Promise<ChatGPTDecision[]> {
+		// Clean expired cache entries
+		this._cleanExpiredCache();
+		
+		// Create portfolio snapshot for cache comparison
+		const portfolioHash = this._createPortfolioHash(portfolio, cash);
+		
+		// Check cache for recent decisions on each ticker
+		const cachedDecisions: ChatGPTDecision[] = [];
+		const tickersToAnalyze: string[] = [];
+		
+		// Get all tickers (existing positions + new opportunities from market data)
+		const allTickers = [
+			...portfolio.map(p => p.ticker),
+			...marketData.map(d => d.symbol).filter(symbol => !portfolio.find(p => p.ticker === symbol))
+		];
+		
+		console.log(`🧠 AI Analysis Cache Check:`);
+		
+		for (const ticker of allTickers) {
+			const cacheEntry = this.researchCache.get(ticker);
+			
+			if (cacheEntry && this._isCacheValid(cacheEntry, portfolioHash)) {
+				console.log(`   💾 Cache HIT for ${ticker} (${Math.round((Date.now() - cacheEntry.timestamp) / 1000)}s ago)`);
+				if (cacheEntry.decision) {
+					cachedDecisions.push(cacheEntry.decision);
+				}
+			} else {
+				console.log(`   🔍 Cache MISS for ${ticker} - needs analysis`);
+				tickersToAnalyze.push(ticker);
+			}
+		}
+		
+		// If all tickers have valid cached decisions, return them
+		if (tickersToAnalyze.length === 0) {
+			console.log(`   ✅ All tickers cached - skipping OpenAI API call`);
+			return cachedDecisions;
+		}
+		
+		console.log(`   🤖 Analyzing ${tickersToAnalyze.length} tickers with OpenAI...`);
+		
+		// Build prompt only for tickers that need analysis
+		const filteredMarketData = marketData.filter(d => tickersToAnalyze.includes(d.symbol));
+		const filteredPortfolio = portfolio.filter(p => tickersToAnalyze.includes(p.ticker));
+		
 		const prompt = this._buildPortfolioPrompt(
-			portfolio,
+			filteredPortfolio,
 			cash,
 			metrics,
-			marketData
+			filteredMarketData
 		);
 
 		try {
@@ -115,7 +208,39 @@ export class ChatGPTService {
 				throw new Error('No content received from OpenAI API');
 			}
 
-			return this._parseDecisions(content);
+			const newDecisions = this._parseDecisions(content);
+			
+			// Cache the new decisions
+			const timestamp = Date.now();
+			for (const decision of newDecisions) {
+				if (decision.ticker) {
+					this.researchCache.set(decision.ticker, {
+						ticker: decision.ticker,
+						decision,
+						timestamp,
+						marketData: marketData.find(d => d.symbol === decision.ticker),
+						portfolioSnapshot: portfolioHash
+					});
+					console.log(`   💾 Cached decision for ${decision.ticker}: ${decision.action}`);
+				}
+			}
+			
+			// Also cache "no decision" for tickers that were analyzed but got no recommendation
+			for (const ticker of tickersToAnalyze) {
+				if (!newDecisions.find(d => d.ticker === ticker) && !this.researchCache.has(ticker)) {
+					this.researchCache.set(ticker, {
+						ticker,
+						decision: null, // No action recommended
+						timestamp,
+						marketData: marketData.find(d => d.symbol === ticker),
+						portfolioSnapshot: portfolioHash
+					});
+					console.log(`   💾 Cached "no action" for ${ticker}`);
+				}
+			}
+			
+			// Combine cached decisions with new decisions
+			return [...cachedDecisions, ...newDecisions];
 		} catch (error) {
 			console.error('❌ Error getting ChatGPT decision:', error);
 			if (axios.isAxiosError(error)) {
